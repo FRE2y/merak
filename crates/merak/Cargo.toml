@@ -5,3 +5,10 @@ edition = "2024"
 publish = false
 
 [dependencies]
+anyhow = "1.0.100"
+axum = "0.8.8"
+serde = { version = "1.0.228", features = ["derive"] }
+tokio = { version = "1.49.0", features = ["full"] }
+utoipa = { version = "5.4.0", features = ["axum_extras"] }
+utoipa-axum = "0.2.0"
+utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
