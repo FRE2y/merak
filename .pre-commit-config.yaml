@@ -14,7 +14,7 @@ repos:
         files: "\\.(jsx?|tsx?|c(js|ts)|m(js|ts)|d\\.(ts|cts|mts)|jsonc?|css)$"
       - id: cargo-format
         name: cargo format
-        entry: cargo fmt -- --check
+        entry: cargo fmt --
         language: system
         types: [text]
         files: "\\.(rs)$"

@@ -1,7 +1,11 @@
 use axum::{
-    extract::{Json, State},
-    http::{HeaderMap, StatusCode, header},
+    extract::{FromRequestParts, Json, State},
+    http::StatusCode,
     response::{IntoResponse, Response},
+};
+use axum_extra::{
+    TypedHeader,
+    headers::{Authorization, authorization::Bearer},
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -17,6 +21,26 @@ use crate::auth::{jwt::TokenPair, service::AuthService};
 pub struct AuthState {
     pub db: Arc<SurrealClient>,
     pub auth_service: Arc<AuthService>,
+}
+
+/// Bearer token extractor
+#[derive(Debug, Clone)]
+pub struct BearerToken(Bearer);
+
+impl FromRequestParts<AuthState> for BearerToken {
+    type Rejection = (StatusCode, String);
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &AuthState,
+    ) -> Result<Self, Self::Rejection> {
+        let TypedHeader(Authorization(bearer)) =
+            TypedHeader::<Authorization<Bearer>>::from_request_parts(parts, state)
+                .await
+                .map_err(|e| (StatusCode::UNAUTHORIZED, e.to_string()))?;
+
+        Ok(BearerToken(bearer))
+    }
 }
 
 /// Registration request
@@ -276,38 +300,11 @@ pub async fn logout() -> impl IntoResponse {
     ),
     tag = "Authentication"
 )]
-pub async fn get_me(State(state): State<AuthState>, headers: HeaderMap) -> Response {
+pub async fn get_me(State(state): State<AuthState>, BearerToken(bearer): BearerToken) -> Response {
     let auth_service = state.auth_service.as_ref();
 
     // Extract token from Authorization header
-    let auth_header = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|h| h.to_str().ok());
-
-    let token = match auth_header {
-        Some(header) => {
-            if let Some(token) = header.strip_prefix("Bearer ") {
-                token.to_string()
-            } else {
-                return (
-                    StatusCode::UNAUTHORIZED,
-                    Json(ErrorResponse {
-                        message: "Invalid authorization header format".to_string(),
-                    }),
-                )
-                    .into_response();
-            }
-        }
-        None => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(ErrorResponse {
-                    message: "Missing authorization header".to_string(),
-                }),
-            )
-                .into_response();
-        }
-    };
+    let token = bearer.token();
 
     // Verify token and get user ID
     let user_id = match auth_service.extract_user_id(token) {

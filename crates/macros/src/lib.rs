@@ -3,7 +3,7 @@ use heck::ToSnakeCase;
 use proc_macro::TokenStream;
 use proc_macro2::Span;
 use quote::quote;
-use syn::{parse_macro_input, DeriveInput, Ident};
+use syn::{DeriveInput, Ident, parse_macro_input};
 
 use crate::attr::{FieldArgs, ModelArgs};
 
@@ -139,7 +139,7 @@ fn expand_model(input: DeriveInput) -> syn::Result<TokenStream> {
     let get_by_primary_key = if let Some(primary_key) = primary_key {
         let primary_ident = Ident::new(&format!("get_by_{}", primary_key), Span::call_site());
         quote! {
-            #vis async fn #primary_ident(db: &::merak_core::SurrealClient, id: String) -> surrealdb::Result<Option<Self>> {
+            #vis async fn #primary_ident(db: &::merak_core::SurrealClient, id: &str) -> surrealdb::Result<Option<Self>> {
                 db.select((Self::TABLE_NAME, id)).await
             }
         }
@@ -174,9 +174,9 @@ fn expand_model(input: DeriveInput) -> syn::Result<TokenStream> {
         impl ::merak_core::Model for #ident {
             const TABLE_NAME: &'static str = #table_name;
             type Data = #data_ident;
+            type Input = #input_ident;
 
             fn table_name(&self) -> &'static str { Self::TABLE_NAME }
-
             fn into_data(self) -> #data_ident { self.into() }
         }
 

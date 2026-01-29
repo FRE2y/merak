@@ -1,11 +1,9 @@
 use serde::Serialize;
 use surrealdb::Surreal;
 use surrealdb::engine::any::Any;
-//Rust edtion 2018+ 就已经弃用了extern crate了
 
 pub mod prelude;
 
-/// 这里应该使用Any 来处理surreal的所有连接类型；Client只能支持Remote；我们是否应该创建自定义类型来托管SurrealDB的连接？
 pub type SurrealClient = Surreal<Any>;
 
 pub trait Model
@@ -14,9 +12,10 @@ where
 {
     const TABLE_NAME: &'static str;
     type Data: Serialize + 'static;
+    type Input: Serialize + 'static;
     fn table_name(&self) -> &'static str;
     fn into_data(self) -> Self::Data;
-    fn objects(client: &SurrealClient) -> Objects<'_, Self, Self::Data> {
+    fn objects(client: &SurrealClient) -> Objects<'_, Self, Self::Input> {
         Objects::new(client)
     }
 }
@@ -40,8 +39,8 @@ where
         }
     }
 
-    pub async fn create(client: &'c SurrealClient, data: D) -> surrealdb::Result<Option<T>> {
-        client.create(T::TABLE_NAME).content(data).await
+    pub async fn create(&self, data: D) -> surrealdb::Result<Option<T>> {
+        self.client.create(T::TABLE_NAME).content(data).await
     }
 
     pub async fn create_with_id(&self, id: String, data: D) -> surrealdb::Result<Option<T>> {

@@ -2,7 +2,6 @@ use anyhow::{Result, anyhow};
 use chrono::Utc;
 use merak_core::{Model, SurrealClient};
 use surrealdb::RecordId;
-use uuid::Uuid;
 
 use super::{
     jwt::{JwtService, TokenPair},
@@ -90,9 +89,6 @@ impl AuthService {
         // Hash the password
         let password_hash = self.password_service.hash_password(&password)?;
 
-        // Generate user ID
-        let user_id = RecordId::from(("users", Uuid::new_v4().to_string()));
-
         // Create user
         let now = Utc::now();
         let user_input = UserInput {
@@ -103,7 +99,7 @@ impl AuthService {
             updated_at: now,
         };
 
-        let created: Option<User> = db.create(user_id.clone()).content(user_input).await?;
+        let created = User::objects(db).create(user_input).await?;
 
         let user = created.ok_or_else(|| anyhow!("Failed to create user"))?;
 
@@ -198,8 +194,8 @@ impl AuthService {
     ///
     /// # Returns
     /// User ID
-    pub fn extract_user_id(&self, access_token: String) -> Result<String> {
-        self.jwt_service.extract_user_id(&access_token)
+    pub fn extract_user_id(&self, access_token: &str) -> Result<String> {
+        self.jwt_service.extract_user_id(access_token)
     }
 
     /// Get user information
@@ -212,7 +208,7 @@ impl AuthService {
     /// User information
     pub async fn get_user(&self, db: &SurrealClient, user_id: &str) -> Result<User> {
         let record_id: RecordId = user_id.parse()?;
-        let user: Option<User> = db.select(record_id).await?;
+        let user = User::get_by_id(db, &record_id.key().to_string()).await?;
         user.ok_or_else(|| anyhow!("User not found"))
     }
 
@@ -232,7 +228,7 @@ impl AuthService {
         user_id: &str,
         old_password: String,
         new_password: String,
-    ) -> Result<User> {
+    ) -> Result<Option<User>> {
         // Validate new password strength
         if !PasswordService::check_password_strength(&new_password) {
             return Err(anyhow!(
@@ -241,7 +237,7 @@ impl AuthService {
         }
 
         // Get the user
-        let user = self.get_user(db, user_id).await?;
+        let mut user = self.get_user(db, user_id).await?;
 
         // Verify old password
         let is_valid = self
@@ -256,16 +252,12 @@ impl AuthService {
         let new_password_hash = self.password_service.hash_password(&new_password)?;
 
         // Update password
-        let record_id: RecordId = user_id.parse()?;
-        let updated: Option<User> = db
-            .update(record_id)
-            .content(serde_json::json!({
-                "password_hash": new_password_hash,
-                "updated_at": Utc::now(),
-            }))
-            .await?;
+        user.password_hash = new_password_hash;
+        user.updated_at = Utc::now();
 
-        updated.ok_or_else(|| anyhow!("Failed to update password"))
+        let updated = user.save(db).await?;
+
+        Ok(updated)
     }
 }
 
