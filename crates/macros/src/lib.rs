@@ -5,21 +5,15 @@ use proc_macro2::Span;
 use quote::quote;
 use syn::{DeriveInput, Ident, parse_macro_input};
 
-use crate::attr::{FieldArgs, ModelArgs};
+use crate::{
+    attr::{FieldArgs, ModelArgs},
+    expand::{expand_data_impl, expand_foreign_methods, expand_input_struct},
+    utils::is_record_id,
+};
 
 mod attr;
-
-fn is_record_id(ty: &syn::Type) -> bool {
-    match ty {
-        syn::Type::Path(path) => path
-            .path
-            .segments
-            .last()
-            .map(|segment| segment.ident == "RecordId")
-            .unwrap_or(false),
-        _ => false,
-    }
-}
+mod expand;
+mod utils;
 
 #[proc_macro_derive(Model, attributes(model, field))]
 pub fn merak_model(input: TokenStream) -> TokenStream {
@@ -44,88 +38,15 @@ fn expand_model(input: DeriveInput) -> syn::Result<TokenStream> {
         }
     };
 
-    let foreign_methods = fields.clone().try_fold(vec![], |mut acc, field| {
-        let field_ident = field.ident.as_ref().unwrap();
-        let method_ident = Ident::new(&field_ident.to_string().replace("_id", ""), ident.span());
-        let field_type = &field.ty;
-        let field_args = FieldArgs::from_field(field)?;
-        if is_record_id(field_type) && field_args.is_foreign_key() {
-            if field_ident == "id" {
-                return Err(syn::Error::new(ident.span(), "Foreign key field must NOT be named `id`"));
-            }
-            let foreign_key = field_args.foreign_key.unwrap();
-            acc.push(quote! {
-                #vis async fn #method_ident(&self, client: &::merak_core::SurrealClient) -> surrealdb::Result<Option<#foreign_key>> {
-                    client.select(&self.#field_ident).await
-                }
-            });
-        } else if field_args.is_foreign_key() {
-            return Err(syn::Error::new(ident.span(), "Foreign key field must be of type `RecordId`"));
-        }
-        Ok::<_, syn::Error>(acc)
-    })?;
+    let foreign_methods = expand_foreign_methods(fields.clone(), vis)?;
 
-    let input_ident = Ident::new(&format!("{}Input", ident), ident.span());
-    let input_fields = fields
-        .clone()
-        .filter(|field| {
-            let field_args = FieldArgs::from_field(field).unwrap();
-            // !field_args.primary && !field_args.created_at && !field_args.updated_at
-            !field_args.primary
-        })
-        .map(|field| {
-            let mut field = field.clone();
-            field.attrs.retain(|attr| !attr.path().is_ident("field"));
-            field
-        });
+    let input_ident = Ident::new(&format!("{}Input", ident), Span::call_site());
+    let input_struct = expand_input_struct(fields.clone(), vis, &input_ident)?;
 
-    let data_ident = Ident::new(&format!("{}Data", ident), ident.span());
-    let data_fields = fields.clone().map(|field| {
-        let mut field = field.clone();
-        if is_record_id(&field.ty) {
-            field.ty = syn::parse_quote!(String);
-        }
-        field.attrs.retain(|attr| !attr.path().is_ident("field"));
-        field
-    });
-    let covert_data_fields = fields.clone().map(|field| {
-        let field_ident = field.ident.as_ref().unwrap();
-        if is_record_id(&field.ty) {
-            quote! {
-                #field_ident: model.#field_ident.to_string()
-            }
-        } else {
-            quote! {
-                #field_ident: model.#field_ident
-            }
-        }
-    });
-    let convert_impl = quote! {
-        impl From<#ident> for #data_ident {
-            fn from(model: #ident) -> Self {
-                #data_ident {
-                    #(#covert_data_fields),*
-                }
-            }
-        }
-    };
+    let data_ident = Ident::new(&format!("{}Data", ident), Span::call_site());
+    let data_impl = expand_data_impl(fields.clone(), vis, ident, &data_ident)?;
 
     let table_name = model_args.table_name.unwrap_or(ident_name.to_snake_case());
-
-    #[cfg(feature = "utoipa")]
-    let data_struct = quote! {
-        #[derive(::serde::Serialize, ::serde::Deserialize, ::utoipa::ToSchema)]
-        #vis struct #data_ident {
-            #(#data_fields),*
-        }
-    };
-    #[cfg(not(feature = "utoipa"))]
-    let data_struct = quote! {
-        #[derive(::serde::Serialize, ::serde::Deserialize)]
-        #vis struct #data_ident {
-            #(#data_fields),*
-        }
-    };
 
     let primary_key = fields.clone().find_map(|field| {
         let field_args = FieldArgs::from_field(field).unwrap();
@@ -154,23 +75,16 @@ fn expand_model(input: DeriveInput) -> syn::Result<TokenStream> {
                 client.update(self.#primary_ident.clone()).content(self).await
             }
 
+            #vis async fn delete(self, client: &::merak_core::SurrealClient) -> surrealdb::Result<Option<Self>> {
+                client.delete(self.#primary_ident.clone()).await
+            }
         }
     } else {
         quote! {}
     };
 
-    Ok(quote! {
-        use ::merak_core::prelude::*;
-
-        #[derive(::serde::Serialize, ::serde::Deserialize)]
-        #vis struct #input_ident {
-            #(#input_fields),*
-        }
-
-        #data_struct
-
-        #convert_impl
-
+    #[cfg(feature = "utoipa")]
+    let trait_impl = quote! {
         impl ::merak_core::Model for #ident {
             const TABLE_NAME: &'static str = #table_name;
             type Data = #data_ident;
@@ -179,6 +93,25 @@ fn expand_model(input: DeriveInput) -> syn::Result<TokenStream> {
             fn table_name(&self) -> &'static str { Self::TABLE_NAME }
             fn into_data(self) -> #data_ident { self.into() }
         }
+    };
+    #[cfg(not(feature = "utoipa"))]
+    let trait_impl = quote! {
+        impl ::merak_core::Model for #ident {
+            const TABLE_NAME: &'static str = #table_name;
+            type Input = #input_ident;
+
+            fn table_name(&self) -> &'static str { Self::TABLE_NAME }
+        }
+    };
+
+    Ok(quote! {
+        use ::merak_core::prelude::*;
+
+        #input_struct
+
+        #data_impl
+
+        #trait_impl
 
         impl #ident {
             #get_by_primary_key

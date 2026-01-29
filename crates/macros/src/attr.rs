@@ -11,8 +11,8 @@ pub struct ModelArgs {
 pub struct FieldArgs {
     pub primary: bool,
     pub foreign_key: Option<syn::Ident>,
-    // pub created_at: bool,
-    // pub updated_at: bool,
+    pub created_at: bool,
+    pub updated_at: bool,
 }
 
 impl FieldArgs {

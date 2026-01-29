@@ -2223,6 +2223,7 @@ dependencies = [
  "merak-macros",
  "serde",
  "surrealdb",
+ "utoipa",
 ]
 
 [[package]]

@@ -1,9 +1,10 @@
-use merak_macros::Model;
-use serde::{Deserialize, Serialize};
-use surrealdb::RecordId;
-
+#[cfg(feature = "utoipa")]
 #[test]
 pub fn data_model() {
+    use merak_macros::Model;
+    use serde::{Deserialize, Serialize};
+    use surrealdb::RecordId;
+
     #[derive(Model, Serialize, Deserialize)]
     struct AnyModel {
         #[field(primary)]
