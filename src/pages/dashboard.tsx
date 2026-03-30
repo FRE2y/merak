@@ -1,11 +1,7 @@
 import { LayoutDashboard, Settings } from 'lucide-react';
-import type { ReactNode } from 'react';
 import { Button } from '../components/ui/button';
 
-interface DashboardProps {
-  children: ReactNode;
-}
-export default function Dashboard({ children }: DashboardProps) {
+export default function Dashboard() {
   return (
     <div className="flex h-screen w-full bg-background text-foreground">
       <aside className="hidden w-64 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground md:flex">
@@ -37,7 +33,7 @@ export default function Dashboard({ children }: DashboardProps) {
           <Button size="sm">Action</Button>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+        <main className="flex-1 overflow-y-auto p-6">Dashboard Page</main>
       </div>
     </div>
   );
